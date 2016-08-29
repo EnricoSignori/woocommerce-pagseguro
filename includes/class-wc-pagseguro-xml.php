@@ -205,6 +205,76 @@ class WC_PagSeguro_XML extends SimpleXMLElement {
 	}
 
 	/**
+	 * Add subscription items/information
+	 *
+	 * @param int $order Subscription Order.
+	 */
+	public function add_subscription_items( $_items ) {
+		$info = $this->addChild( 'preApproval' );
+		$info->addChild( 'charge', 'manual' );
+
+		// Fetching subscription product information
+		foreach ( $_items as $id => $_item ) {
+			$info->addChild( 'name', $_item['name'] );
+			$info->addChild( 'details' )->add_cdata( $_item['description'] );
+			$info->addChild( 'amountPerPayment', $_item['amount'] );
+			$info->addChild( 'maxAmountPerPayment', $_item['amount'] );
+			$info->addChild( 'period', $this->period_status( $_item['period'] ) );
+			$info->addChild( 'maxPaymentsPerPeriod', $this->period_number( $_item['period'] ) );
+			$info->addChild( 'maxAmountPerPeriod', $_item['amount'] );
+			$info->addChild( 'initialDate', $_item['initialDate'] );
+			$info->addChild( 'finalDate', $_item['finalDate'] );
+			$info->addChild( 'maxTotalAmount', $this->period_number( $_item['period'], $_item['amount'] ) );
+		}
+	}
+
+	/**
+	 * The only periods supported by PagSeguro are weekly, monthly, bimonthly, trimonthly, semiannually, yearly
+	 * 
+	 * @param  string $period 
+	 * @return string Period with support for PagSeguro standards
+	 */
+	private function period_status( $period ) {
+		$periods = array(
+			'day'   => 'daily',
+			'week'  => 'weekly',
+			'month' => 'monthly',
+			'year'  => 'yearly',
+		);
+		foreach ( $periods as $k => $v ) {
+			if ( $period == $k ) {
+				$period = $v;
+			}
+		}
+		return $period;
+	}
+
+	/**
+	 * Adds the proper number of period
+	 * 
+	 * @param  string $period
+	 * @return int Number
+	 */
+	private function period_number( $period, $total = 0 ) {
+		$times = array(
+			'day'   => 1,
+			'week'  => 1,
+			'month' => 1,
+			'year'  => 12,
+		);
+		foreach ( $times as $k => $v ) {
+			if ( $period == $k ) {
+				$period = $v;
+			}
+		}
+
+		if ( 0 != $total ) {
+			$period = wc_format_decimal( $total * $period, get_option( 'woocommerce_price_num_decimals' ) );
+		}
+		return $period;
+	}
+
+	/**
 	 * Add extra amount.
 	 *
 	 * @param float $extra_amount Extra amount.

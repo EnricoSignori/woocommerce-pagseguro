@@ -39,6 +39,13 @@ if ( ! class_exists( 'WC_PagSeguro' ) ) :
 		protected static $instance = null;
 
 		/**
+		 * Whether or not we need to load code for / WooCommerce Subscriptions and Addons
+		 * 
+		 * @var boolean
+		 */
+		private $subscription_support_enabled = false;
+
+		/**
 		 * Initialize the plugin public actions.
 		 */
 		private function __construct() {
@@ -47,6 +54,12 @@ if ( ! class_exists( 'WC_PagSeguro' ) ) :
 
 			// Checks with WooCommerce is installed.
 			if ( class_exists( 'WC_Payment_Gateway' ) ) {
+				
+				// Add support for WooCommerce Subscriptions early on
+				if ( class_exists( 'WC_Subscriptions_Order' ) && function_exists( 'wcs_create_renewal_order' ) ) {
+					$this->subscription_support_enabled = true;
+				}
+
 				$this->includes();
 
 				add_filter( 'woocommerce_payment_gateways', array( $this, 'add_gateway' ) );
@@ -118,6 +131,10 @@ if ( ! class_exists( 'WC_PagSeguro' ) ) :
 			include_once dirname( __FILE__ ) . '/includes/class-wc-pagseguro-xml.php';
 			include_once dirname( __FILE__ ) . '/includes/class-wc-pagseguro-api.php';
 			include_once dirname( __FILE__ ) . '/includes/class-wc-pagseguro-gateway.php';
+
+			if ( $this->subscription_support_enabled ) {
+				include_once dirname( __FILE__ ) . '/includes/class-wc-pagseguro-gateway-addons.php';
+			}
 		}
 
 		/**
@@ -128,8 +145,12 @@ if ( ! class_exists( 'WC_PagSeguro' ) ) :
 		 * @return array          Payment methods with PagSeguro.
 		 */
 		public function add_gateway( $methods ) {
+			if ( $this->subscription_support_enabled ) {
+				$methods[] = 'WC_PagSeguro_Gateway_Addons';
+			}
+			
 			$methods[] = 'WC_PagSeguro_Gateway';
-
+			
 			return $methods;
 		}
 

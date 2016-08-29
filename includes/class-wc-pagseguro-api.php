@@ -106,6 +106,46 @@ class WC_PagSeguro_API {
 	}
 
 	/**
+	 * Get the subscription notification URL.
+	 *
+	 * @return string.
+	 */
+	protected function get_subscription_notification_url() {
+		return 'https://ws.' . $this->get_environment() . 'pagseguro.uol.com.br/v2/pre-approvals/notifications/';
+	}
+
+	/**
+	 * Get the subscription URL.
+	 *
+	 * @return string.
+	 */
+	protected function get_subscription_url() {
+		return 'https://ws.' . $this->get_environment() . 'pagseguro.uol.com.br/v2/pre-approvals/request';
+	}
+	
+	/**
+	 * Request subscription URL.
+	 * 
+	 * @param  string $code PreApprovalRequestCode.
+	 * 
+	 * @return string
+	 */
+	protected function get_subscription_resquest_url( $code ) {
+		return 'https://ws.' . $this->get_environment() . 'pagseguro.uol.com.br/v2/pre-approvals/request.html?code=' . $code;
+	}
+
+	/**
+	 * Cancel subscription URL.
+	 * 
+	 * @param  int $subscription_id Subscription Order ID
+	 * 
+	 * @return string
+	 */
+	protected function get_subscription_cancel_url( $subscription_id ) {
+		return 'https://ws.' . $this->get_environment() . 'pagseguro.uol.com.br/v2/pre-approvals/cancel/' . $subscription_id;
+	}
+
+	/**
 	 * Check if is localhost.
 	 *
 	 * @return bool
@@ -401,12 +441,29 @@ class WC_PagSeguro_API {
 						if ( $meta = $item_meta->display( true, true ) ) {
 							$item_name .= ' - ' . $meta;
 						}
+						
+						if ( $this->is_subscription( $order->id ) ) {
+							$subs         = wcs_get_subscription( $order->id );
+							$subs_product = wc_get_product( $order_item['product_id'] );
 
-						$items[] = array(
-							'description' => $this->sanitize_description( $item_name ),
-							'amount'      => $this->money_format( $item_total ),
-							'quantity'    => $order_item['qty'],
-						);
+							$items[] = array(
+								'name'         		  => $this->sanitize_description( $item_name ),
+								'description'         => $this->sanitize_description( $subs_product->post->post_excerpt ),
+								'amount'              => $this->money_format( $item_total ),
+								'quantity'            => $order_item['qty'],
+								'period' 			  => $subs_product->subscription_period,
+								'amount'              => $this->money_format( $item_total ),
+								'initialDate'         => $order->post->post_date_gmt,
+								'finalDate'           => get_post_meta( $order->id, '_schedule_next_payment', true ),
+							);
+						}
+						else {
+							$items[] = array(
+								'description' => $this->sanitize_description( $item_name ),
+								'amount'      => $this->money_format( $item_total ),
+								'quantity'    => $order_item['qty'],
+							);
+						}
 					}
 				}
 			}
@@ -471,7 +528,15 @@ class WC_PagSeguro_API {
 		$xml->add_reference( $this->gateway->invoice_prefix . $order->id );
 		$xml->add_sender_data( $order );
 		$xml->add_shipping_data( $order, $ship_to, $data['shipping_cost'] );
-		$xml->add_items( $data['items'] );
+
+		// Add subscription information
+		if ( $this->is_subscription( $order->id ) ) {
+			$xml->add_subscription_items( $data['items'] );
+		}
+		else {
+			$xml->add_items( $data['items'] );
+		}
+
 		$xml->add_extra_amount( $data['extra_amount'] );
 
 		// Checks if is localhost... PagSeguro not accept localhost urls!
@@ -512,7 +577,15 @@ class WC_PagSeguro_API {
 		if ( ! in_array( $this->is_localhost(), array( 'localhost', '127.0.0.1' ) ) ) {
 			$xml->add_notification_url( WC()->api_request_url( 'WC_PagSeguro_Gateway' ) );
 		}
-		$xml->add_items( $data['items'] );
+
+		// Add subscription information
+		if ( $this->is_subscription( $order->id ) ) {
+			$xml->add_subscription_items( $data['items'] );
+		}
+		else {
+			$xml->add_items( $data['items'] );
+		}
+
 		$xml->add_extra_amount( $data['extra_amount'] );
 		$xml->add_reference( $this->gateway->invoice_prefix . $order->id );
 		$xml->add_shipping_data( $order, $ship_to, $data['shipping_cost'] );
@@ -644,6 +717,7 @@ class WC_PagSeguro_API {
 	 * @return array
 	 */
 	public function do_payment_request( $order, $posted ) {
+
 		$payment_method = isset( $posted['pagseguro_payment_method'] ) ? $posted['pagseguro_payment_method'] : '';
 
 		/**
@@ -664,7 +738,14 @@ class WC_PagSeguro_API {
 			$this->gateway->log->add( $this->gateway->id, 'Requesting direct payment for order ' . $order->get_order_number() . ' with the following data: ' . $xml );
 		}
 
-		$url      = add_query_arg( array( 'email' => $this->gateway->get_email(), 'token' => $this->gateway->get_token() ), $this->get_transactions_url() );
+		$transaction_url = $this->get_transactions_url();
+
+		// Different transaction URL for subscription product
+		if ( $this->is_subscription( $order->id ) ) {
+			$transaction_url = $this->get_subscription_url();
+		}
+
+		$url      = add_query_arg( array( 'email' => $this->gateway->get_email(), 'token' => $this->gateway->get_token() ), $transaction_url );
 		$response = $this->do_request( $url, 'POST', $xml, array( 'Content-Type' => 'application/xml;charset=UTF-8' ) );
 
 		if ( is_wp_error( $response ) ) {
@@ -760,7 +841,7 @@ class WC_PagSeguro_API {
 		}
 
 		// Checks the notificationType.
-		if ( 'transaction' != $data['notificationType'] ) {
+		if ( 'transaction' != $data['notificationType'] || 'preApproval' != $data['notificationType'] ) {
 			if ( 'yes' == $this->gateway->debug ) {
 				$this->gateway->log->add( $this->gateway->id, 'Invalid IPN request, invalid "notificationType": ' . print_r( $data, true ) );
 			}
@@ -768,8 +849,15 @@ class WC_PagSeguro_API {
 			return false;
 		}
 
+		$notification_url = $this->get_notification_url();
+
+		// Checks subscription notificationType and give a different notification url
+		if ( 'preApproval' == $data['notificationType'] ) {
+			$notification_url = $this->get_subscription_notification_url();
+		}
+
 		// Gets the PagSeguro response.
-		$url      = add_query_arg( array( 'email' => $this->gateway->get_email(), 'token' => $this->gateway->get_token() ), $this->get_notification_url() . esc_attr( $data['notificationCode'] ) );
+		$url      = add_query_arg( array( 'email' => $this->gateway->get_email(), 'token' => $this->gateway->get_token() ), $notification_url . esc_attr( $data['notificationCode'] ) );
 		$response = $this->do_request( $url, 'GET' );
 
 		// Check to see if the request was valid.
@@ -848,5 +936,18 @@ class WC_PagSeguro_API {
 		}
 
 		return false;
+	}
+
+	/**
+	 * It answers the question, is $order_id a subscription?
+	 * 
+	 * @param int $order_id Subscription Order ID
+	 * 
+	 * @return boolean true|false
+	 */
+	public function is_subscription( $order_id ) {
+		if ( class_exists( 'WC_Subscriptions_Order' ) ) {
+			return ( function_exists( 'wcs_order_contains_subscription' ) && ( wcs_order_contains_subscription( $order_id ) || wcs_is_subscription( $order_id ) || wcs_order_contains_renewal( $order_id ) ) );
+		}
 	}
 }
