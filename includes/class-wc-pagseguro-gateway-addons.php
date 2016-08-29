@@ -37,51 +37,9 @@ class WC_PagSeguro_Gateway_Addons extends WC_PagSeguro_Gateway {
 		}
 	}
 
-	/**
-	 * process_subscription_payment function.
-	 * @param mixed $order
-	 * @param int $amount (default: 0)
-	 * @param string $stripe_token (default: '')
-	 * @param  bool initial_payment
-	 */
-	public function process_subscription_payment( $order = '', $amount = 0 ) {
-		// Get source from order
-		$source = $this->get_order_source( $order );
+	public function process_subscription_payment( $order = '', $amount = 0 ) {}
 
-		// If no order source was defined, use user source instead.
-		if ( ! $source->customer ) {
-			$source = $this->get_source( $order->customer_user );
-		}
 
-		// Or fail :(
-		if ( ! $source->customer ) {
-			return new WP_Error( 'stripe_error', __( 'Customer not found', 'woocommerce-pagseguro' ) );
-		}
-
-		WC_Stripe::log( "Info: Begin processing subscriotion payment for order {$order->id} for the amount of {$amount}" );
-
-		// Make the request
-		$request             = $this->generate_payment_request( $order, $source );
-		$request['amount']   = $this->get_stripe_amount( $amount, $request['currency'] );
-		$request['metadata'] = array(
-			'payment_type'   => 'recurring'
-		);
-		$response            = WC_Stripe_API::request( $request );
-
-		// Process valid response
-		if ( ! is_wp_error( $response ) ) {
-			$this->process_response( $response, $order );
-		}
-
-		return $response;
-	}
-
-	/**
-	 * scheduled_subscription_payment function.
-	 *
-	 * @param $amount_to_charge float The amount to charge.
-	 * @param $renewal_order WC_Order A WC_Order object created to record the renewal payment.
-	 */
 	public function scheduled_subscription_payment( $amount_to_charge, $renewal_order ) {
 		// Define some callbacks if the first attempt fails.
 		$retry_callbacks = array(
@@ -94,7 +52,7 @@ class WC_PagSeguro_Gateway_Addons extends WC_PagSeguro_Gateway {
 
 			if ( is_wp_error( $response ) ) {
 				if ( 0 === sizeof( $retry_callbacks ) ) {
-					$renewal_order->update_status( 'failed', sprintf( __( 'Stripe Transaction Failed (%s)', 'woocommerce-pagseguro' ), $response->get_error_message() ) );
+					$renewal_order->update_status( 'failed', sprintf( __( 'PagSeguro Transaction Failed (%s)', 'woocommerce-pagseguro' ), $response->get_error_message() ) );
 					break;
 				} else {
 					$retry_callback = array_shift( $retry_callbacks );
